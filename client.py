@@ -1,6 +1,5 @@
 import socket
 
-HEADER = 64
 FORMAT ='utf-8'
 SERVER = input("Server HOST: ")
 PORT = 50505
@@ -14,5 +13,8 @@ client.connect(ADDR)
 
 
 client.send("Hello World".encode(FORMAT))
+input()
+message_recv = client.recv(2048).decode(FORMAT)
+print(f"Server: {message_recv}")
 input()
 client.send("quit".encode(FORMAT))
