@@ -13,7 +13,6 @@ client.connect(ADDR)
 
 
 client.send("Hello World".encode(FORMAT))
-input()
 message_recv = client.recv(2048).decode(FORMAT)
 print(f"Server: {message_recv}")
 input()
