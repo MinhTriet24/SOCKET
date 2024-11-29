@@ -1,4 +1,5 @@
 import socket
+import os
 
 FORMAT ='utf-8'
 SERVER = input("Server HOST: ")
