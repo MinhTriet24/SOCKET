@@ -1,6 +1,7 @@
 import socket
 import threading
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO, filename="log_server.txt", filemode="w",
                     format="%(asctime)s - %(message)s")
@@ -23,7 +24,6 @@ clients = {}
 #Hàm kiểm tra các clients đang kết nối
 def print_client_present():
     print(f"Current clients: {list(clients.keys())}")
-
 
 # Hàm làm việc trực tiếp với client
 def work_with_client(connection, address):
@@ -66,6 +66,28 @@ def send_message_to_client(target_address, message):
         print(f"Doesn't find this {target_address}")
         logger.info(f"Doesn't find this {target_address}")
     
+def send_file(conn, filename):
+    """
+    Gửi file đến client nếu file tồn tại, ngược lại gửi thông báo lỗi.
+    """
+    if os.path.exists(filename):
+        # Lấy kích thước file
+        file_size = os.path.getsize(filename)
+        
+        # Gửi thông báo thành công kèm theo kích thước file
+        conn.sendall(f"SUCCESS|{file_size}".encode(FORMAT))
+
+        # Đọc và gửi file theo từng phần
+        with open(filename, "rb") as file:
+            while chunk := file.read(1024):  # Đọc file từng khối 1024 byte
+                conn.sendall(chunk)
+        #conn.sendall(b"END")
+        print(f"Đã gửi file '{filename}' ({file_size} Bytes) thành công.")
+    else:
+        conn.sendall("ERROR: File không tồn tại!".encode(FORMAT))
+
+
+
 
 def start():
     server.listen()
@@ -95,7 +117,8 @@ def start():
             send_message_to_client(target_address, mess)
         else:
             print(f"Target_address nhập sai")
-            
+
+
         
 
 start()
