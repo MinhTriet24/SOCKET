@@ -29,7 +29,7 @@ def download_file(client, filename):
         client.sendall(f"download {filename}".encode())
 
         # Nhận phản hồi từ server
-        response = client.recv(1024).decode("utf-8", errors="replace")
+        response = client.recv(1024).decode(FORMAT, errors="replace")
         if response.startswith("SUCCESS"):
             file_size = int(response.split("|")[1])  # Lấy kích thước file từ phản hồi
 
