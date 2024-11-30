@@ -1,11 +1,19 @@
 import socket
 import os
+import random
+import time
 
 FORMAT ='utf-8'
 SERVER = input("Server HOST: ")
+if not SERVER:
+        SERVER = '127.0.0.1'
 PORT = 50505
 ADDR = (SERVER, PORT)
+CLIENT_FOLDER = "client_folder"
+SIZE = 1024
 
+
+# Tuan
 def get_unique_filename(directory, filename):       
     """
     Trả về tên file duy nhất trong thư mục bằng cách thêm số thứ tự nếu file đã tồn tại.
@@ -20,6 +28,7 @@ def get_unique_filename(directory, filename):
 
     return unique_filename
 
+#Tuan
 def download_file(client, filename):
     """
     Yêu cầu server gửi file và lưu file vào thư mục Downloads. 
@@ -30,7 +39,7 @@ def download_file(client, filename):
         client.sendall(f"download {filename}".encode())
 
         # Nhận phản hồi từ server
-        response = client.recv(1024).decode(FORMAT, errors="replace")
+        response = client.recv(SIZE).decode(FORMAT, errors="replace")
         if response.startswith("SUCCESS"):
             file_size = int(response.split("|")[1])  # Lấy kích thước file từ phản hồi
 
@@ -67,31 +76,21 @@ def download_file(client, filename):
             print(response)  # Hiển thị lỗi từ server
     except Exception as e:
         print(f"Lỗi khi tải file: {e}")
-        
-def login():
-    success = False
-    while not success:
-        PIN = random.randint(1000,9999)
-        print(f"CAPCHA: {PIN}")
-        user = input("Input pin: ")
-        if(int(user) == PIN):
-            success = True
-        else:
-            print("Error: The pin is not valid")
 
+#Triet
 def uploadFile(fileName, conn):
     #defination that file is in client folder
     filePath = os.path.join(CLIENT_FOLDER,fileName)
 
     #check that file is exist
     if not os.path.isfile(filePath):
-        print(f"[CLIENT] Error: The file {fileName} does not exist.")
+        print(f"Error: The file {fileName} does not exist.")
         return 
 
     msg = f"UPLOAD|FILE|{SERVER}|{PORT}"
     conn.send(msg.encode(FORMAT))
     time.sleep(0.01)
-    print(f"[CLIENT] Send request upload file.")
+    print(f"Send request upload file: {msg}")
 
     #send file name and file size
     parts = fileName.split("/")
@@ -102,7 +101,7 @@ def uploadFile(fileName, conn):
     fileSize = os.path.getsize(filePath)
     conn.send(f"{fileNameSv}|{fileSize}".encode(FORMAT))
     time.sleep(0.01)
-    print(f"[CLIENT] Send file {fileName} ({fileSize} Bytes)")
+    print(f"Send file {fileName} ({fileSize} Bytes) to server")
 
     cmd = conn.recv(SIZE).decode(FORMAT)
     if(cmd == "OK"):
@@ -132,11 +131,13 @@ def uploadFolder(folderName, conn):
         return
     
     #send folder name and signal this is folder to server
-    conn.send(f"UPLOAD|FOLDER|{SERVER}|{PORT}".encode(FORMAT))
+    msg = f"UPLOAD|FOLDER|{SERVER}|{PORT}"
+    conn.send(msg.encode(FORMAT))
+    print(f"Send request upload folder: {msg} to server.")
     time.sleep(0.01)
 
     cmd = conn.recv(SIZE).decode(FORMAT)
-    if(cmd == "OK"):
+    if(cmd == "Ok"):
         conn.send(folderName.encode(FORMAT))
         time.sleep(0.01)
         msg = conn.recv(SIZE).decode(FORMAT)
@@ -152,48 +153,46 @@ def uploadFolder(folderName, conn):
     conn.send("END FOLDER".encode(FORMAT))
     time.sleep(0.01)
     msg = conn.recv(SIZE).decode(FORMAT)
-    print(f"[SERVER] {msg}")
+    print(f"[SERVER]: {msg}")
+
+def login():
+    success = False
+    while not success:
+        PIN = random.randint(1000,9999)
+        print(f"CAPCHA: {PIN}")
+        user = input("Input pin: ")
+        if(int(user) == PIN):
+            success = True
+        else:
+            print("Error: The pin is not valid")
 
 def handle():
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect(ADDR)
-    client.settimeout(10)
-    print(f"[CLIENT] Connected to server at {ADDR}.")
-
+    client.connect(ADDR) 
+    
     while True:
-        request = input("Input message: ").strip()
-        if (request == "quit"):
-            msg = f"QUIT|{SERVER}|{PORT}"
-            client.send(msg.encode(FORMAT))
-            client.close()
-            break
-        #if request is upload or download file
-        cmd = request.split(" ")
-        if(cmd[0] == "upload"):
-            if(os.path.isdir(os.path.join(CLIENT_FOLDER,cmd[1]))):
-                uploadFolder(cmd[1], client)
-            elif(os.path.isfile(os.path.join(CLIENT_FOLDER,cmd[1]))):
-                uploadFile(cmd[1], client)
-        elif(cmd[0] == "download"):
-            if(os.path.isfile(os.path.join(CLIENT_FOLDER,cmd[1]))):
-                #download_file(client, cmd[1])
-                continue
-
-    client.close()
-    print("[CLIENT] Connection closed.")
-
-
-"""
-if not SERVER:
-    SERVER = '127.0.0.1'
-
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect(ADDR)
-
-
-client.send("Hello World".encode(FORMAT))
-message_recv = client.recv(2048).decode(FORMAT)
-print(f"Server: {message_recv}")
-input()
-client.send("quit".encode(FORMAT))
-"""
+        #Format upload messsage: request (upload) + filename/foldername or quit. Server doesn't respond for another message
+            #Format download message: request (download/ download_folder) + filename/foldername or quit
+            request = input("Input message: ").strip()
+            if (request == "quit"):
+                msg = f"QUIT|{SERVER}|{PORT}"
+                client.send(msg.encode(FORMAT))
+                client.close()
+                print("Connection closed.")
+                break
+            #if request is upload or download file
+            cmd = request.split(" ")
+            if(cmd[0] == "upload"):
+                if(os.path.isdir(os.path.join(CLIENT_FOLDER,cmd[1]))):
+                    uploadFolder(cmd[1], client)
+                elif(os.path.isfile(os.path.join(CLIENT_FOLDER,cmd[1]))):
+                    uploadFile(cmd[1], client)
+            elif(cmd[0] == "download"):
+                #Request to download file
+                filename = request.split(" ", 1)[1]
+                download_file(client, filename)
+            #Not yet
+            #elif(cmd[0] == "download_folder"):
+                #foldername = request.split(" ",1)[1]
+                #download_folder(client, foldername)
+handle()
