@@ -67,9 +67,123 @@ def download_file(client, filename):
             print(response)  # Hiển thị lỗi từ server
     except Exception as e:
         print(f"Lỗi khi tải file: {e}")
+        
+def login():
+    success = False
+    while not success:
+        PIN = random.randint(1000,9999)
+        print(f"CAPCHA: {PIN}")
+        user = input("Input pin: ")
+        if(int(user) == PIN):
+            success = True
+        else:
+            print("Error: The pin is not valid")
+
+def uploadFile(fileName, conn):
+    #defination that file is in client folder
+    filePath = os.path.join(CLIENT_FOLDER,fileName)
+
+    #check that file is exist
+    if not os.path.isfile(filePath):
+        print(f"[CLIENT] Error: The file {fileName} does not exist.")
+        return 
+
+    msg = f"UPLOAD|FILE|{SERVER}|{PORT}"
+    conn.send(msg.encode(FORMAT))
+    time.sleep(0.01)
+    print(f"[CLIENT] Send request upload file.")
+
+    #send file name and file size
+    parts = fileName.split("/")
+    if(len(parts) > 1):
+        fileNameSv = parts[len(parts)-1]
+    else:
+        fileNameSv = fileName
+    fileSize = os.path.getsize(filePath)
+    conn.send(f"{fileNameSv}|{fileSize}".encode(FORMAT))
+    time.sleep(0.01)
+    print(f"[CLIENT] Send file {fileName} ({fileSize} Bytes)")
+
+    cmd = conn.recv(SIZE).decode(FORMAT)
+    if(cmd == "OK"):
+        #send file script
+        with open(filePath, "rb") as file:
+            size = 0
+            while chunk:= file.read(SIZE):
+                conn.send(chunk)
+                size+= len(chunk)
+                if(size >= fileSize):
+                    break
+        
+
+        msg = conn.recv(SIZE).decode(FORMAT)
+        print(f"[SERVER] {msg}")
+    else:
+        print(f"[SERVER] Not accept request.")
+        return
+
+def uploadFolder(folderName, conn):
+    #defination folder path
+    folderPath = os.path.join(CLIENT_FOLDER, folderName)
+
+    #check folder is exists
+    if not os.path.isdir(folderPath):
+        print(f"Error: The folder {folderName} does not exists.")
+        return
+    
+    #send folder name and signal this is folder to server
+    conn.send(f"UPLOAD|FOLDER|{SERVER}|{PORT}".encode(FORMAT))
+    time.sleep(0.01)
+
+    cmd = conn.recv(SIZE).decode(FORMAT)
+    if(cmd == "OK"):
+        conn.send(folderName.encode(FORMAT))
+        time.sleep(0.01)
+        msg = conn.recv(SIZE).decode(FORMAT)
+        print(msg)
+
+    items = os.listdir(folderPath)
+    for item in items:
+        itemPath = os.path.join(folderPath,item)
+        if os.path.isdir(itemPath):
+           uploadFolder(f"{folderName}/{item}", conn)
+        if os.path.isfile(itemPath):
+            uploadFile(f"{folderName}/{item}",conn)
+    conn.send("END FOLDER".encode(FORMAT))
+    time.sleep(0.01)
+    msg = conn.recv(SIZE).decode(FORMAT)
+    print(f"[SERVER] {msg}")
+
+def handle():
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.connect(ADDR)
+    client.settimeout(10)
+    print(f"[CLIENT] Connected to server at {ADDR}.")
+
+    while True:
+        request = input("Input message: ").strip()
+        if (request == "quit"):
+            msg = f"QUIT|{SERVER}|{PORT}"
+            client.send(msg.encode(FORMAT))
+            client.close()
+            break
+        #if request is upload or download file
+        cmd = request.split(" ")
+        if(cmd[0] == "upload"):
+            if(os.path.isdir(os.path.join(CLIENT_FOLDER,cmd[1]))):
+                uploadFolder(cmd[1], client)
+            elif(os.path.isfile(os.path.join(CLIENT_FOLDER,cmd[1]))):
+                uploadFile(cmd[1], client)
+        elif(cmd[0] == "download"):
+            if(os.path.isfile(os.path.join(CLIENT_FOLDER,cmd[1]))):
+                #download_file(client, cmd[1])
+                continue
+
+    client.close()
+    print("[CLIENT] Connection closed.")
 
 
-
+"""
 if not SERVER:
     SERVER = '127.0.0.1'
 
@@ -82,3 +196,4 @@ message_recv = client.recv(2048).decode(FORMAT)
 print(f"Server: {message_recv}")
 input()
 client.send("quit".encode(FORMAT))
+"""
