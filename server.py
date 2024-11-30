@@ -86,7 +86,119 @@ def send_file(conn, filename):
     else:
         conn.sendall("ERROR: File không tồn tại!".encode(FORMAT))
 
+def uploadFile(conn, folderPath):
+    #revceie file name
+    msg = conn.recv(SIZE).decode(FORMAT)
+    try:
+        fileName,fileSize = msg.split("|")
+        fileSize = int(fileSize)
+    except:
+        conn.send(f"[SERVER] Error: Unpack message.".encode(FORMAT))
+        time.sleep(0.01)
+        print(f"[SERVER] Error: Unpack messages.")
+        return
+    
+    print(f"[SERVER] Revceied file name {fileName} ({fileSize} Bytes).")
+    #defination file path
+    filePath = os.path.join(folderPath, fileName)
+    #split  name and ext from file
+    name, ext = os.path.splitext(fileName)
 
+    #check file exist
+    count = 1
+    while os.path.exists(filePath):
+        filePath = os.path.join(SERVER_FOLDER, f"{name}({count}){ext}")
+        count+=1
+    conn.send("OK".encode(FORMAT))
+    print(filePath)
+
+    #save file at server_folder
+    endFile = True
+    with open(filePath, "wb") as file:
+        size = 0
+        while chunk:= conn.recv(SIZE):
+            if not chunk:
+                print(f"[SERVER] Connection lost while receiving file")
+                endFile = False
+                break
+            file.write(chunk)
+            size += len(chunk)
+            if(size>=fileSize):
+                break   
+    
+    if endFile == True:
+        print(f"[SERVER] Saved file: {fileName} ({size} Bytes).")
+        conn.send(f"Upload successfully file {fileName} ({size} Bytes)".encode(FORMAT))
+        time.sleep(0.01)
+    else:
+        print("[SERVER] Upload failed")
+ 
+
+def uploadFolder(conn, preFolderPath):
+    #receive folder name when server receive folder upload from client
+    conn.send("OK".encode(FORMAT))
+    folderName = conn.recv(SIZE).decode(FORMAT)
+    parts = folderName.split("/")
+    if(len(parts) > 1):
+        folderName = parts[len(parts)-1]
+    
+    folderPath = os.path.join(preFolderPath, folderName)
+    print(folderPath)
+
+    #check exists
+    if not os.path.exists(folderPath): #create folder if it not exists
+        os.makedirs(folderPath)
+        print(f"[SERVER] Create folder {folderName} successfully.")
+        conn.send(f"[SERVER] Created fodler {folderName} successfully.".encode(FORMAT))
+        time.sleep(0.01)
+    else:
+        count =0
+        while os.path.exists(folderPath):
+            count+=1
+            folderPath = f"{SERVER_FOLDER}/{folderName}({count})"
+        os.makedirs(folderPath)
+        folderName = f"{folderName}({count})"
+        print(f"[SERVER] Create folder {folderName} successfully.")
+        conn.send(f"[SERVER] Created fodler {folderName} successfully.".encode(FORMAT))
+        time.sleep(0.01)
+
+    while True:
+        msg = conn.recv(SIZE).decode(FORMAT)
+        if(msg == "END FOLDER"):
+            print(f"[SERVER] Saved folder {folderName}")
+            conn.send(f"Uploaded successfully folder {folderName}.".encode(FORMAT))
+            time.sleep(0.01)
+            break
+        cmd = msg.split("|")
+        if(len(cmd)>0):
+            if(cmd[1] == "FILE"):
+                print(f"[SERVER] Receive upload file signal")
+                uploadFile(conn, folderPath)
+            elif(cmd[1] == "FOLDER"):
+                print(f"[SERVER] Receive upload folder signal")
+                uploadFolder(conn, folderPath)
+        
+
+def handle(conn):
+    while True:
+        msg = conn.recv(SIZE).decode(FORMAT)
+        print(f"[CLIENT] Sent messages {msg}.")
+        cmd = msg.split("|")
+        if cmd[0] == "QUIT":
+            print(f"Disconnected from {cmd[1]},{cmd[2]}")
+            conn.close()
+            break
+        elif(cmd[0] == "UPLOAD"):
+            if(cmd[1] == "FILE"):
+                print(f"[SERVER] Receive upload file signal from {cmd[2]},{cmd[3]}.")
+                uploadFile(conn, SERVER_FOLDER) 
+            elif(cmd[1] == "FOLDER"):
+                print(f"[SERVER] Receive upload folder signal from {cmd[2]},{cmd[3]}.")
+                uploadFolder(conn, SERVER_FOLDER)
+        elif(cmd[0] == "DOWNLOAD"):
+            #send_file(...)
+            continue
+    return 
 
 
 def start():
