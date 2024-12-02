@@ -5,7 +5,7 @@ import os
 import time
 import zipfile
 from tkinter import filedialog
-
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, filename="log_server.txt", filemode="w",
                     format="%(asctime)s - %(message)s")
@@ -21,7 +21,6 @@ SERVER_FOLDER = "server_folder"
 SIZE = 1024
 CHUNK_SIZE = 1024*1024
 
-socket_lock = threading.Lock()
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind(ADDR)
@@ -31,6 +30,52 @@ logger.info("Create server successfully")
 clients = {}
 
 #Tuan
+def send_file(conn):
+    """
+    Gửi file từ server tới client theo từng chunk mà không cần lưu các chunk tạm thời.
+    """
+    try:
+        # Nhận yêu cầu từ client
+        file_name = conn.recv(1024).decode().strip()
+        conn.sendall("OK".encode())
+
+        # Lấy đường dẫn file
+        file_path = os.path.join(SERVER_FOLDER, file_name)
+        if not os.path.exists(file_path):
+            conn.sendall("NOT FOUND".encode())
+            raise FileNotFoundError(f"File {file_name} không tồn tại.")
+        else:
+            conn.sendall("FOUND".encode())
+        # Lấy kích thước file
+        file_size = os.path.getsize(file_path)
+        conn.sendall(f"{file_size}".encode())  # Gửi kích thước file
+        ack = conn.recv(10).decode().strip()  # Nhận ACK từ client
+        if ack != "OK":
+            raise Exception("Client không xác nhận kích thước file.")
+
+        # Gửi dữ liệu file theo từng chunk
+        with open(file_path, "rb") as file:
+            bytes_sent = 0
+            while bytes_sent < file_size:
+                chunk_data = file.read(CHUNK_SIZE)
+                conn.sendall(chunk_data)
+                bytes_sent += len(chunk_data)
+
+                # Hiển thị tiến độ gửi
+                progress = (bytes_sent / file_size) * 100
+                print(f"Đã gửi: {progress:.2f}%")
+
+        # Nhận xác nhận từ client sau khi gửi xong
+        ack = conn.recv(10).decode().strip()
+        if ack != "OK":
+            raise Exception("Client không xác nhận nhận đủ file.")
+        else:
+            print(f"File {file_name} đã được gửi thành công.")
+    except Exception as e:
+        conn.sendall(b"NOT OK")
+        print(f"Lỗi khi gửi file {file_name}: {e}")
+
+
 def get_unique_name(name, parent_folder_path, is_folder=False):
     """
     Đảm bảo tên file hoặc thư mục là duy nhất trong thư mục cha bằng cách thêm số vào cuối nếu cần.
@@ -67,83 +112,6 @@ def get_unique_name(name, parent_folder_path, is_folder=False):
     
     return unique_name
 
-def split_file(file_path, chunk_size):
-    chunks = []
-    with open(file_path, 'rb') as file:
-        while True:
-            chunk = file.read(chunk_size)
-            if not chunk:
-                break
-            chunk_filename = f"{file_path}_part_{len(chunks)}"
-            with open(chunk_filename, 'wb') as chunk_file:
-                chunk_file.write(chunk)
-            chunks.append(chunk_filename)
-    return chunks
-
-def send_file(conn, file_name, folder_path):
-    try:
-        data = conn.recv(1024).decode().strip()
-        conn.sendall("OK".encode())
-        # Get file path
-        file_path = os.path.join(folder_path, file_name)
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File {file_name} not found.")
-
-        #  Split the file into chunks
-        chunks = split_file(file_path, CHUNK_SIZE)
-        num_chunks = len(chunks)
-        conn.sendall(f"{num_chunks}".encode())  
-        
-        # Send chunks to the client
-       
-        threads = []
-        for index, chunk_path in enumerate(chunks):
-            thread = threading.Thread(target= send_chunk, args=(conn, index, chunk_path, num_chunks))
-            threads.append(thread)
-            thread.start()
-            
-        for thread in threads:
-            thread.join()
-        # ACK for send all chunks
-
-        for chunk in chunks:
-            if os.path.exists(chunk):
-                os.remove(chunk)
-        ack = conn.recv(10).decode().strip()
-
-        if ack != 'OK':
-            raise Exception("Failed to receive acknowledgment from client.")
-        else:
-            print(f"File {file_name} downloaded successfully.")
-    except Exception as e:
-        conn.sendall(b"NOT OK")
-        print(f"Error handling download: {e}")
-
-
-def send_chunk(conn, chunk_index, chunk_path, num_chunks):
-    try:
-        
-        with socket_lock:
-            # Get chunk size
-            chunk_size = os.path.getsize(chunk_path)
-            conn.sendall(f"{chunk_index}:{chunk_size}\n".encode())
-            # ACK for chunk size
-            ack = conn.recv(10).decode().strip()
-            if ack != 'OK':
-                raise Exception("Failed to receive acknowledgment from client.")
-            
-            # Send chunk data
-            with open(chunk_path, 'rb') as chunk_file:
-                chunk_data = chunk_file.read()
-                conn.sendall(chunk_data)
-            # ACK for chunk data
-            ack = conn.recv(10).decode().strip()
-            if ack != 'OK':
-                raise Exception("Failed to receive acknowledgment from client.")
-            else:
-                print(f"sent chunk_{chunk_index} size: {os.path.getsize(chunk_path)} ({chunk_index + 1}/{num_chunks})")
-    except Exception as e:
-        print(f"Error sending chunk {chunk_index}: {e}")
 
 def zip_folder(folder_path, zip_name):
     """
@@ -158,68 +126,59 @@ def zip_folder(folder_path, zip_name):
 
 def send_folder(server_socket):
     """
-    Xử lý yêu cầu từ client và gửi folder dưới dạng file ZIP, sử dụng kỹ thuật đa luồng để gửi các chunk.
+    Xử lý yêu cầu từ client và gửi folder dưới dạng file ZIP trực tiếp, không sử dụng đa luồng.
     """
     try:
         # Nhận tên folder từ client
         folder_name = server_socket.recv(1024).decode().strip()
         folder_path = os.path.join(SERVER_FOLDER, folder_name)
 
-        
         if os.path.exists(folder_path) and os.path.isdir(folder_path):
             # Nén folder thành file zip
             zip_name = f"{folder_name}.zip"
-            zip_name=get_unique_name(zip_name,folder_path,True)
-            zip_size = zip_folder(folder_path, zip_name)
+            zip_path = os.path.join(SERVER_FOLDER, zip_name)
+            zip_name = get_unique_name(zip_name, SERVER_FOLDER, is_folder=False)
+            zip_size = zip_folder(folder_path, zip_path)
 
-            # Gửi phản hồi và kích thước file zip
+            # Gửi thông báo rằng folder tồn tại
             server_socket.send(b"FOUND")
-            rep=server_socket.recv(1024).decode().strip()
-            if rep != "OK" :
-                raise Exception("DON'T FOUND FILE")
-            
-            
+            ack = server_socket.recv(1024).decode().strip()
+            if ack != "OK":
+                raise Exception("Client không xác nhận tồn tại của file ZIP.")
+
+            # Gửi kích thước file ZIP
             server_socket.send(str(zip_size).encode())
+            ack = server_socket.recv(1024).decode().strip()
+            if ack != "OK":
+                raise Exception("Client không xác nhận kích thước file ZIP.")
 
-            # Chia file ZIP thành các chunk
-            chunks = split_file(zip_name, CHUNK_SIZE)
-            num_chunks = len(chunks)
+            # Gửi dữ liệu file ZIP trực tiếp
+            with open(zip_path, "rb") as zip_file:
+                bytes_sent = 0
+                while bytes_sent < zip_size:
+                    chunk_data = zip_file.read(CHUNK_SIZE)  # Đọc dữ liệu theo chunk
+                    server_socket.sendall(chunk_data)
+                    bytes_sent += len(chunk_data)
 
-            # Gửi số lượng chunk cho client
-            server_socket.sendall(f"{num_chunks}".encode())
+                    # Hiển thị tiến độ gửi
+                    progress = (bytes_sent / zip_size) * 100
+                    print(f"Đã gửi: {progress:.2f}%")
 
-            # Gửi từng chunk sử dụng đa luồng
-            threads = []
-            for index, chunk_path in enumerate(chunks):
-                thread = threading.Thread(
-                    target=send_chunk, 
-                    args=(server_socket, index, chunk_path, num_chunks)
-                )
-                threads.append(thread)
-                thread.start()
-
-            # Đợi tất cả các luồng hoàn thành
-            for thread in threads:
-                thread.join()
-
-            # Nhận ACK từ client sau khi tất cả các chunk đã được gửi
-            ack = server_socket.recv(10).decode().strip()
-            if ack != 'OK':
-                raise Exception("Failed to receive acknowledgment for all chunks.")
+            # Nhận xác nhận từ client sau khi gửi xong
+            ack = server_socket.recv(1024).decode().strip()
+            if ack != "OK":
+                raise Exception("Client không xác nhận nhận đủ file ZIP.")
             else:
-                print(f"Folder '{folder_name}' has been sent successfully.")
+                print(f"Folder '{folder_name}' đã được gửi thành công dưới dạng ZIP.")
 
-            # Dọn dẹp các file tạm
-            for chunk in chunks:
-                if os.path.exists(chunk):
-                    os.remove(chunk)
-            os.remove(zip_name)
+            # Xóa file ZIP sau khi gửi
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
         else:
-              server_socket.sendall(b"NOT FOUND")
+            # Thông báo rằng folder không tồn tại
+            server_socket.send(b"NOT FOUND")
     except Exception as e:
-        
-        print(f"Error handling folder request: {e}")
-
+        print(f"Lỗi khi xử lý yêu cầu gửi folder: {e}")
 
 #Triet
 def uploadFile(conn, folderPath, address):
@@ -346,10 +305,9 @@ def handle(connection, address):
                     uploadFile(connection, SERVER_FOLDER, address) 
                 elif(cmd[1] == "FOLDER"):
                     uploadFolder(connection, SERVER_FOLDER, address)
-            elif(cmd[0] == "DOWNLOAD "):
-                filename = request.split(" ", 1)[1]
-                send_file(conn, filename,SERVER_FOLDER)
-            elif(cmd[0] =="DOWNLOAD_FOLDER")
+            elif(cmd[0] == "download "):
+                send_file(conn)
+            elif(cmd[0] =="downdload_folder ")
                 send_folder(conn)
                 continue
             else:
