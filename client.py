@@ -18,7 +18,6 @@ CLIENT_FOLDER = "client_folder"
 SIZE = 1024
 CHUNK_SIZE = 1024*1024
 
-socket_lock = threading.Lock() # Da Luong
 
 # Tuan
 def get_unique_name(name, parent_folder_path, is_folder=False):
@@ -57,158 +56,113 @@ def get_unique_name(name, parent_folder_path, is_folder=False):
     
     return unique_name
 
-def merge_chunks(chunks, output_file): # Merge the chunks into a single output file
-    with open(output_file, 'wb') as out_file:
-        for chunk_file in chunks:
-            with open(chunk_file, 'rb') as chunk:
-                out_file.write(chunk.read())
-            os.remove(chunk_file)
 
-def download_file(client_socket, file_path,download_folder_path):
+def download_file(client_socket, file_name):
     """
-    Yêu cầu server gửi file và lưu file vào thư mục Downloads. 
-    Nếu trùng tên file, hỏi người dùng có muốn tải không.
+    Nhận file từ server và lưu vào thư mục chỉ định.
+    Nếu trùng tên file, tự động đổi tên để tránh ghi đè.
     """
     try:
-        #Send filename
-        file_path=os.path.basename(file_path)
-        client_socket.sendall(file_path.encode())
-        print(f"Send filename to server: {file_path.encode()}")
-        # ACK for receving file name
+        # Gửi yêu cầu file đến server
+        client_socket.sendall(file_name.encode())
+        print(f"Yêu cầu tải file: {file_name}")
+
         ack = client_socket.recv(1024).decode().strip()
         if ack != "OK":
             raise Exception("Failed to receive acknowledgment from server.")
-            
-        # Receive the number of chunks
-        num_chunks = int(client_socket.recv(1024).decode())
-        print(f"Num of chunks: {num_chunks}")
-            
-        # Open dialog to choose destination of download folder 
-        if not download_folder_path:
-            print("No download folder selected.")
-            return
-            
-        # Init list to store chunk paths and threads
-        chunk_paths = []
-        threads = []
-        for _ in range(num_chunks):
-            thread = threading.Thread(target = download_chunk, args = (file_path, client_socket, chunk_paths, num_chunks, download_folder_path, socket_lock))
-            threads.append(thread)
-            thread.start()
-                
-        for thread in threads:
-            thread.join()
-                
-        # Merge chunks if all were downloaded successfully
-        if None not in chunk_paths:
-            output_file = os.path.join(download_folder_path, os.path.basename(get_unique_name(file_path, download_folder_path,False))) # ensure the file names are unique
-            merge_chunks(chunk_paths, output_file)
-                
-            client_socket.send('OK'.encode())
-            print(f"File {file_path} downloaded successfully.")
-    except socket.error as E:
-        print(f"Socket error: {E}")
-    except Exception as E:
-        print(f"Error: {E}")
 
-def download_chunk(file_path, client_socket, chunk_paths, num_chunks, download_folder_path,socket_lock):
-    try:
-        with socket_lock:
-            # Receive chunk info
-            chunk_info = client_socket.recv(1024).decode().strip()
-            chunk_index, chunk_size = map(int, chunk_info.split(':'))
-            # ACK for chunk info
-            client_socket.send('OK'.encode()) 
-            
-            # Receive chunk data
-            chunk_data = b''
-            while len(chunk_data) < chunk_size:
-                chunk_data += client_socket.recv(min(1024, chunk_size - len(chunk_data)))
-                
-            #  Save the chunk data to a file
-            chunk_path = os.path.join(download_folder_path, f"{file_path}_chunk_{chunk_index}")
-            with open(chunk_path, 'wb') as chunk_file:
-                chunk_file.write(chunk_data)
-                
-            # ACK for chunk data
-            client_socket.send('OK'.encode())
-            print(f"Received chunk_{chunk_index} size: {chunk_size} ({chunk_index + 1}/{num_chunks})")
-            chunk_paths.append(chunk_path)
+        # Nhận phản hồi từ server
+        response = client_socket.recv(1024).decode()
+        if response == "NOT FOUND":
+            print(f"File '{file_name}' không tồn tại trên server.")
+            return
+
+        # Nhận kích thước file
+        file_size = int(client_socket.recv(1024).decode())
+        client_socket.send(b"OK")
+        print(f"Đang tải file '{file_name}' kích thước {file_size} bytes...")
+
+        # Tạo thư mục tải xuống nếu chưa tồn tại
+        os.makedirs(CLIENT_FOLDER, exist_ok=True)
+        file_path = os.path.join(CLIENT_FOLDER, get_unique_name(file_name, CLIENT_FOLDER, False))
+
+        # Nhận dữ liệu file
+        with open(file_path, "wb") as file:
+            bytes_received = 0
+            while bytes_received < file_size:
+                chunk_data = client_socket.recv(CHUNK_SIZE)
+                file.write(chunk_data)
+                bytes_received += len(chunk_data)
+
+                # Hiển thị tiến độ tải
+                progress = (bytes_received / file_size) * 100
+                print(f"Đã tải: {progress:.2f}%")
+
+        # Gửi xác nhận đã nhận xong file
+        client_socket.sendall(b"OK")
+        finish_time = datetime.now().strftime("%H:%M:%S %d-%m-%Y")
+        print(f"File '{file_name}' đã được tải thành công vào '{file_path}'.")
+        print(f"Tổng cộng: {bytes_received} bytes lúc {finish_time}.")
     except Exception as e:
-        print(f"Error downloading file {file_path}: {e}")
+        print(f"Lỗi khi tải file: {e}")
 
 
 def download_folder(client_socket, folder_name):
     """
-    Yêu cầu server gửi folder và lưu folder vào thư mục Downloads bằng cách sử dụng kỹ thuật đa luồng.
+    Nhận folder từ server dưới dạng file ZIP, giải nén và lưu vào thư mục chỉ định.
     """
     try:
-        # Gửi tên folder đến server
+        # Gửi yêu cầu folder đến server
         client_socket.sendall(folder_name.encode())
-        print(f"Requested folder: {folder_name}")
+        print(f"Yêu cầu tải folder: {folder_name}")
 
         # Nhận phản hồi từ server
         response = client_socket.recv(1024).decode()
-        if response == "FOUND":
-            client_socket.sendall(b"OK")
-            file_size = int(client_socket.recv(1024).decode())
+        if response == "NOT FOUND":
+            print(f"Folder '{folder_name}' không tồn tại trên server.")
+            return
 
-            # Nhận số lượng chunk
-            num_chunks = int(client_socket.recv(1024).decode())
-            print(f"Receiving folder '{folder_name}' ({num_chunks} chunks)...")
+        # Nhận kích thước file ZIP
+        client_socket.send(b"OK")
+        zip_size = int(client_socket.recv(1024).decode())
+        client_socket.send(b"OK")
+        print(f"Đang tải folder '{folder_name}' dưới dạng file ZIP kích thước {zip_size} bytes...")
 
-            # Tạo thư mục tạm để lưu chunk
-            #temp_folder = os.path.join(DOWNLOAD_FOLDER, f"{folder_name}_temp")
-            #os.makedirs(temp_folder, exist_ok=True)
+        # Tạo thư mục tải xuống nếu chưa tồn tại
+        os.makedirs(CLIENT_FOLDER, exist_ok=True)
+        zip_path = os.path.join(CLIENT_FOLDER, f"{folder_name}.zip")
 
-            # Danh sách lưu đường dẫn các chunk
-            chunk_paths = []
-            threads = []
+        # Nhận dữ liệu file ZIP
+        with open(zip_path, "wb") as zip_file:
+            bytes_received = 0
+            while bytes_received < zip_size:
+                chunk_data = client_socket.recv(CHUNK_SIZE)
+                zip_file.write(chunk_data)
+                bytes_received += len(chunk_data)
 
-            # Tải từng chunk bằng đa luồng
-            for _ in range(num_chunks):
-                thread = threading.Thread(
-                    target=download_chunk,
-                    args=(
-                        folder_name,  # Tên file ZIP tạm
-                        client_socket,
-                        chunk_paths,
-                        num_chunks,
-                        CLIENT_FOLDER,
-                        socket_lock,
-                    ),
-                )
-                threads.append(thread)
-                thread.start()
+                # Hiển thị tiến độ tải
+                progress = (bytes_received / zip_size) * 100
+                print(f"Đã tải: {progress:.2f}%")
 
-            # Đợi tất cả các luồng hoàn thành
-            for thread in threads:
-                thread.join()
+        # Gửi xác nhận đã nhận xong file ZIP
+        client_socket.sendall(b"OK")
+        print(f"File ZIP của folder '{folder_name}' đã được tải thành công vào '{zip_path}'.")
 
-            # Kiểm tra nếu tất cả các chunk đã được tải thành công
-            if None not in chunk_paths:
-                # Ghép các chunk thành file ZIP
-                zip_path = os.path.join(CLIENT_FOLDER, f"{folder_name}.zip")
-                merge_chunks(chunk_paths, zip_path)
+        # Giải nén file ZIP
+        extract_folder_name = get_unique_name(folder_name, CLIENT_FOLDER, is_folder=True)
+        extract_folder_path = os.path.join(CLIENT_FOLDER, extract_folder_name)
+        os.makedirs(extract_folder_path, exist_ok=True)
 
-                # Giải nén file ZIP
-                folder_name=get_unique_name(folder_name,CLIENT_FOLDER,is_folder=True)
-                extract_folder = os.path.join(CLIENT_FOLDER, folder_name)
-                os.makedirs(extract_folder, exist_ok=True)
+        with zipfile.ZipFile(zip_path, 'r') as zipf:
+            zipf.extractall(extract_folder_path)
 
-                with zipfile.ZipFile(zip_path, 'r') as zipf:
-                    zipf.extractall(extract_folder)
-
-                # Xóa file ZIP sau khi giải nén
-                os.remove(zip_path)
-                print(f"Folder '{folder_name}' has been downloaded and extracted to '{CLIENT_FOLDER}'.")
-                client_socket.sendall(b"OK")  # Gửi ACK xác nhận đã tải xong
-            else:
-                print(f"Error: Not all chunks for folder '{folder_name}' were downloaded.")
-        else:
-            print(f"Folder '{folder_name}' not found on server.")
+        # Xóa file ZIP sau khi giải nén
+        os.remove(zip_path)
+        finish_time = datetime.now().strftime("%H:%M:%S %d-%m-%Y")
+        print(f"Folder '{folder_name}' đã được tải và giải nén vào '{extract_folder_path}'.")
+        print(f"Tổng cộng: {zip_size} bytes lúc {finish_time}.")
     except Exception as e:
-        print(f"Error downloading folder: {e}")
+        print(f"Lỗi khi tải folder: {e}")
             
 #Triet
 def uploadFile(fileName, conn):
@@ -320,12 +274,12 @@ def handle():
                             uploadFolder(cmd[1], client)
                         elif(os.path.isfile(os.path.join(CLIENT_FOLDER,cmd[1]))):
                             uploadFile(cmd[1], client)
-                    elif(cmd[0] == "download "):
+                    elif(cmd[0] == "download "):   #có dấu space
                         #Request to download file
                         filename = command.split(" ", 1)[1]
-                        download_file(client_socket, filename,CLIENT_FOLDER)
+                        download_file(client_socket, filename)
                     #Not yet
-                    elif(cmd[0] == "download_folder"):
+                    elif(cmd[0] == "download_folder "):
                         folder_name = command.split(" ", 1)[1]
                         download_folder(client_socket, folder_name)
                     else:
