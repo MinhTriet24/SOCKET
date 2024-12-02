@@ -165,82 +165,127 @@ def download_folder(client_socket, folder_name):
         print(f"Lỗi khi tải folder: {e}")
             
 #Triet
-def uploadFile(fileName, conn):
-    #defination that file is in client folder
-    filePath = os.path.join(CLIENT_FOLDER,fileName)
+def uploadFile(file_name, conn):
+    #tạo 1 đường dẫn tới file cần upload từ thư mục gốc
+    file_path = os.path.join(CLIENT_FOLDER,file_name)
 
-    #check that file is exist
-    if not os.path.isfile(filePath):
-        print(f"Error: The file {fileName} does not exist.")
-        return 
+    try:
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File {file_name} does not exist.")
+    except FileNotFoundError as e:
+        print(f"Exception caught: {e}")
+        return
 
-    msg = f"UPLOAD|FILE|{SERVER}|{PORT}"
+    #khi tìm thấy file, đóng gói tín hiệu cần upload file lên cho server
+    file_size = os.path.getsize(file_path) #lấy kích thước của file
+    msg = f"UPLOAD|FILE|{file_size}|{SERVER}|{PORT}"
     conn.send(msg.encode(FORMAT))
     time.sleep(0.01)
-    print(f"Send request upload file: {msg}")
 
-    #send file name and file size
-    parts = fileName.split("/")
-    if(len(parts) > 1):
-        fileNameSv = parts[len(parts)-1]
-    else:
-        fileNameSv = fileName
-    fileSize = os.path.getsize(filePath)
-    conn.send(f"{fileNameSv}|{fileSize}".encode(FORMAT))
+    #gửi tên file và kích thước file cần upload
+    file_name_server = os.path.basename(file_name) #lấy tên file, do file_name có thể là 1 đường dẫn
+    conn.send(f"{file_name_server}|{file_size}".encode(FORMAT))
     time.sleep(0.01)
-    print(f"Send file {fileName} ({fileSize} Bytes) to server")
 
-    cmd = conn.recv(SIZE).decode(FORMAT)
-    if(cmd == "OK"):
-        #send file script
-        with open(filePath, "rb") as file:
-            size = 0
+    try:
+        response = conn.recv(SIZE).decode(FORMAT)
+        if(response != "OK"): #nếu yêu cầu gửi không được đồng ý
+            raise ValueError("Upload request has refuse by server")
+        
+        #nếu được sẽ thực hiện gửi file theo dạng gửi từng chunk
+        with open(file_path, "rb") as file:
+            bytes_sent = 0
             while chunk:= file.read(SIZE):
                 conn.send(chunk)
-                size+= len(chunk)
-                if(size >= fileSize):
+                bytes_sent+= len(chunk)
+                if(bytes_sent >= file_size):
                     break
         
-
         msg = conn.recv(SIZE).decode(FORMAT)
         print(f"[SERVER] {msg}")
-    else:
-        print(f"[SERVER] Not accept request.")
+    except ValueError as e:
+        print(f"Server response error: {e}")
+        return
+    except ConnectionError as e: #lỗi do kết nối trong quá trình truyền file
+        print(f"Connection error during file upload: {e}")
+        return
+    except IOError as e: #lỗi khi không thể đọc được file do không có quyền truy cập hay gì đó
+        print(f"File I/O error: {e}")
+        return
+    except Exception as e: #Các lỗi không mong đợi khác
+        print(f"Unexpected error: {e}")
         return
 
-def uploadFolder(folderName, conn):
-    #defination folder path
-    folderPath = os.path.join(CLIENT_FOLDER, folderName)
+#gửi folder theo cách gửi tuần tự từng tập tin
+def uploadFolder(folder_name, conn):
+    #tạo 1 đường dẫn đến thư mục cần upload
+    folder_path = os.path.join(CLIENT_FOLDER, folder_name)
 
-    #check folder is exists
-    if not os.path.isdir(folderPath):
-        print(f"Error: The folder {folderName} does not exists.")
+    #kiểm tra nó có tồn tại hay không
+    try:
+        if not os.path.exists(folder_path):
+            raise FileNotFoundError(f"Folder {folder_name} does not exist.")
+    except FileNotFoundError as e: #nếu folder không tồn tại thì return để người dùng nhập lại
+        print(f"Exception caught: {e}.")
         return
     
-    #send folder name and signal this is folder to server
-    msg = f"UPLOAD|FOLDER|{SERVER}|{PORT}"
+    #gửi tín hiệu upload folder và tên,kích thước folder cho server
+    folder_size = os.path.getsize(folder_path)
+    msg = f"UPLOAD|FOLDER|{folder_size}|{SERVER}|{PORT}"
     conn.send(msg.encode(FORMAT))
-    print(f"Send request upload folder: {msg} to server.")
-    time.sleep(0.01)
 
-    cmd = conn.recv(SIZE).decode(FORMAT)
-    if(cmd == "Ok"):
-        conn.send(folderName.encode(FORMAT))
-        time.sleep(0.01)
-        msg = conn.recv(SIZE).decode(FORMAT)
-        print(msg)
+    #nhận phản hồi từ server xem có đồng ý yêu cầu upload hay không
+    try:
+        response = conn.recv(SIZE).decode(FORMAT)
+        if(response != "Ok"):
+            raise ValueError("Server has refuse upload folder.")
+        
+        #trường hợp server OK yêu cầu upload folder
+        conn.send(folder_name.encode(FORMAT)) #client gửi tên folder
 
-    items = os.listdir(folderPath)
+    except ValueError as e:
+        print(f"Exception error: {e}.")
+        print(f"[SERVER] {response}.")
+        return
+    except Exception as e:
+        print(f"Unexpected error: {e}.")
+
+    #liệt kê tất cả các file và các folder con trong folder cần gửi
+    try:
+        items = os.listdir(folder_path)
+    except OSError as e:
+        print(f"Error ascending folder {folder_name}: {e}")
+        conn.send(f"[CLIENT] Error ascending folder {folder_name}: {e}.".encode(FORMAT))
+        return
+    
     for item in items:
-        itemPath = os.path.join(folderPath,item)
-        if os.path.isdir(itemPath):
-           uploadFolder(f"{folderName}/{item}", conn)
-        if os.path.isfile(itemPath):
-            uploadFile(f"{folderName}/{item}",conn)
+        try:
+            item_path = os.path.join(folder_path, item)
+            if os.path.isdir(item_path):
+                uploadFolder(f"{folder_name}/{item}", conn)
+            elif os.path.isfile(item_path):
+                uploadFile(f"{folder_name}/{item}", conn)
+        except OSError as e:
+            print(f"Error processing item {item} in folder {folder_path}: {e}")
+            conn.send(f"[SERVER]: Error processing item {item}.".encode(FORMAT))
+            continue  # Tiếp tục xử lý các item khác
+
     conn.send("END FOLDER".encode(FORMAT))
     time.sleep(0.01)
+
     msg = conn.recv(SIZE).decode(FORMAT)
-    print(f"[SERVER]: {msg}")
+    print(f"[SERVER] {msg}")
+
+def upload(fpath, connection):
+    if not os.path.exists(os.path.join(CLIENT_FOLDER,fpath)):
+        print(f"[CLIENT] Error: File/Folder does not exists.")
+        return
+
+    #trường hợp file.folder cần upload có tồn tại
+    if os.path.isdir(os.path.join(CLIENT_FOLDER,fpath)):
+        uploadFolder(fpath, connection)
+    elif os.path.isfile(os.path.join(CLIENT_FOLDER,fpath)):
+        uploadFile(fpath, connection)
 
 def login():
     success = False
@@ -269,11 +314,8 @@ def handle():
                         break
                     #if request is upload or download file
                     cmd = request.split(" ")
-                    if(cmd[0] == "upload"):
-                        if(os.path.isdir(os.path.join(CLIENT_FOLDER,cmd[1]))):
-                            uploadFolder(cmd[1], client)
-                        elif(os.path.isfile(os.path.join(CLIENT_FOLDER,cmd[1]))):
-                            uploadFile(cmd[1], client)
+                    if(cmd[0].lower() == "upload"):
+                        upload(cmd[1],client)
                     elif(cmd[0] == "download "):   #có dấu space
                         #Request to download file
                         filename = command.split(" ", 1)[1]
