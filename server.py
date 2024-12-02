@@ -181,107 +181,141 @@ def send_folder(server_socket):
         print(f"Lỗi khi xử lý yêu cầu gửi folder: {e}")
 
 #Triet
-def uploadFile(conn, folderPath, address):
-    #revceie file name
+def free_bytes():
+    total, used, free = shutil.disk_usage("/")
+    return free
+
+def uploadFile(conn, folder_path, address):
+    #nhận tên file và kích thước file
     msg = conn.recv(SIZE).decode(FORMAT)
     try:
-        fileName,fileSize = msg.split("|")
-        fileSize = int(fileSize)
+        file_name,file_size = msg.split("|")
+        file_size = int(file_size)
     except:
-        conn.send(f"[SERVER]: Error.Unpack message.".encode(FORMAT))
-        time.sleep(0.01)
-        print(f"Error: Unpack messages from {address}.")
-        print("\n")
+        conn.send(f"[SERVER]: Error unpack message.".encode(FORMAT))
+        print(f"[SERVER] Error: Unpack messages from {address}.")
         logger.info(f"Eror unpack message from {address} and notify it")
         return
     
-    print(f"Received file {fileName} ({fileSize} Bytes) from {address}.")
-    logger.info(f"Receive file {fileName} ({fileSize} from {address})")
-    #defination file path
-    filePath = os.path.join(folderPath, fileName)
-    #split  name and ext from file
-    name, ext = os.path.splitext(fileName)
-
-    #check file exist
-    count = 1
-    while os.path.exists(filePath):
-        filePath = os.path.join(SERVER_FOLDER, f"{name}({count}){ext}")
-        count+=1
+    logger.info(f"Receive file {file_name} ({file_size} from {address})")
+    
+    #tạo đường dẫn file mới theo tên file nhận được từ server
+    file_path = os.path.join(folder_path, get_unique_name(file_name,folder_path,os.path.isdir(file_name)))
     conn.send("OK".encode(FORMAT))
 
-    #save file at server_folder
-    endFile = True
-    with open(filePath, "wb") as file:
-        size = 0
-        while chunk:= conn.recv(SIZE):
-            if not chunk:
-                print(f"Connection lost while receiving file from {address}")
-                logger.info(f"Connection lost while receiving file from {address}")
-                endFile = False
-                break
-            file.write(chunk)
-            size += len(chunk)
-            if(size>=fileSize):
-                break   
-    
-    if endFile == True:
-        print(f"Saved successfully file: {fileName} ({size} Bytes) from {address}.")
-        print(f"\n")
-        conn.send(f"Upload successfully file {fileName} ({size} Bytes)".encode(FORMAT))
-        logger.info(f"Saved and notify successfully file: {fileName} ({size} Bytes) from {address}.")
-        time.sleep(0.01)
-    else:
-        print(f"Upload file failed from {address}")
-        print("\n")
-        logger.info(f"Upload file failed from {address}")
- 
-def uploadFolder(conn, preFolderPath, address):
-    #receive folder name when server receive folder upload from client
-    conn.send("Ok".encode(FORMAT))
-    logger.info(f"Notify server ready for uploading folder from {address}")
-    folderName = conn.recv(SIZE).decode(FORMAT)
-    parts = folderName.split("/")
-    if(len(parts) > 1):
-        folderName = parts[len(parts)-1]
-    
-    folderPath = os.path.join(preFolderPath, folderName)
-    # print(folderPath)
+    #nhận các gói chunk và ghi vào file đã tạo
+    try:
+        success = False
+        with open(file_path, "wb") as file:
+            bytes_recv = 0
+            while chunk:= conn.recv(SIZE):
+                if not chunk:
+                    print(f"Connection lost while receiving file from {address}")
+                    logger.info(f"Connection lost while receiving file from {address}")
+                    break
+                file.write(chunk)
+                bytes_recv += len(chunk)
+                if(bytes_recv>=file_size):
+                    success = True
+                    break 
+        
+        if success: #trường hợp đã gửi file thành công
+            print(f"[SERVER] Upload file {file_name} successfully.")
+            conn.send(f"Uploaded successfull file {file_name}.".encode(FORMAT))
 
-    #check exists
-    if not os.path.exists(folderPath): #create folder if it not exists
-        os.makedirs(folderPath)
-        print(f"Created folder {folderName} successfully for {address}.")
-        logger.info(f"Created folder {folderName} successfully for {address}.")
-        conn.send(f"[SERVER]: Created folder {folderName} successfully.".encode(FORMAT))
-        time.sleep(0.01)
+        elif bytes_recv != file_size: #trường hợp up file không hoàn chỉnh do mất gói hay mất kết nối 
+            logger.error(f"File {file_path} incomplete: expected {file_size}, received {bytes_recv}")
+            conn.send(f"[SERVER]: File transfer incomplete.".encode(FORMAT))
+            os.remove(file_path)  # Xóa file không hoàn chỉnh
+            return
+
+    #trường hợp lỗi khi mở file để ghi
+    except OSError as e:
+        logger.error(f"Error writing to file {file_path}: {e}")
+        conn.send(f"[SERVER]: Error writing to file.".encode(FORMAT))
+        return  
+    except Exception as e:
+        # Xử lý các lỗi không mong muốn khác
+        logger.error(f"Unexpected error during file upload: {e}")
+        conn.send(f"[SERVER]: Unexpected error during file upload.".encode(FORMAT))
+        return
+    
+def uploadFolder(conn, pre_folder_path, address):
+    #nhận tên folder từ máy client
+    folder_name = conn.recv(SIZE).decode(FORMAT)
+    print(folder_name)
+    folder_name = os.path.basename(folder_name) #tên của folder
+
+    folder_path = os.path.join(pre_folder_path, folder_name)
+
+    #kiểm tra folder đã tồn tại hay chưa
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+        logger.info(f"Created folder {folder_name} successfully for {address}.")
     else:
         count = 0
-        while os.path.exists(folderPath):
+        while os.path.exists(folder_path):
             count+=1
-            folderPath = f"{SERVER_FOLDER}/{folderName}({count})"
-        os.makedirs(folderPath)
-        folderName = f"{folderName}({count})"
-        print(f"Created folder {folderName} successfully for {address}.")
-        logger.info(f"Created folder {folderName} successfully for {address}.")
-        conn.send(f"[SERVER]: Created fodler {folderName} successfully.".encode(FORMAT))
-        time.sleep(0.01)
+            folder_path = f"{SERVER_FOLDER}/{folder_name}({count})"
+        os.makedirs(folder_path)
+        folder_name = f"{folder_name}({count})"
+        logger.info(f"Created folder {folder_name} successfully for {address}.")
 
+    #sau khi đã tạo được thư mục
     while True:
-        msg = conn.recv(SIZE).decode(FORMAT)
-        if(msg == "END FOLDER"):
-            print(f"Saved folder {folderName} successfully from {address}")
-            logger.info(f"Saved folder {folderName} successfully from {address}")
-            conn.send(f"Uploaded successfully folder: {folderName}.".encode(FORMAT))
-            time.sleep(0.01)
-            break
-        cmd = msg.split("|")
-        if(len(cmd)>0):
-            if(cmd[1] == "FILE"):
-                print(f"Received upload file signal")
-                uploadFile(conn, folderPath)
-            elif(cmd[1] == "FOLDER"):
-                print(f"Received upload folder signal")
-                uploadFolder(conn, folderPath)
+        try:
+            msg = conn.recv(SIZE).decode(FORMAT)
+            print(msg)
+            #xử lý khi nhận được tín hiệu kết thúc folder
+            if(msg == "END FOLDER"):
+                print(f"Saved folder {folder_name} successfully from {address}")
+                logger.info(f"Saved folder {folder_name} successfully from {address}")
+                conn.send(f"Uploaded successfully folder: {folder_name}.".encode(FORMAT))
+                break
+            
+            #khi tín hiệu là gửi file, foler hay thông báo lỗi
+            cmd = msg.split("|")
+            if(len(cmd)== 1 and cmd!="END FOLDER"):
+                raise OSError(f"{msg}.")
+            
+            if cmd[1] == "FILE":
+                uploadFile(conn, folder_path,address)
+            elif cmd[1] == "FOLDER":
+                uploadFolder(conn,folder_path,address)
+            else:
+                raise ValueError("Unknown type.")
+        
+        #trường hợp client bị lỗi trong quá trình gửi
+        except OSError as e:
+           print(f"{msg}")
+           return
+        except ValueError as e:
+            print(f"Error: {e}")
+        except Exception as e:
+           print(f"Exception caught: {e}")
+           return
+
+def upload(type, size, connection, address):
+    try:
+        store = free_bytes()
+        if store <size:
+            raise OSError("No space left on device.")
+        
+        #trường hợp đủ dung lượng
+        if(type == "FILE"):
+            uploadFile(connection, SERVER_FOLDER, address)
+        elif type == "FOLDER":
+            connection.send("Ok".encode(FORMAT))
+            uploadFolder(connection,SERVER_FOLDER,address)
+            logger.info(f"Notify server ready for uploading folder from {address}")
+
+    except OSError as e: #xử lý khi server hết dung lượng
+        print(f"OS Error: {e}")
+        connection.send("No space left on server.".encode(FORMAT))
+        return
+    except Exception as e:
+        print(f"Exception caught: {e}")
+        return
         
 # Work_directly_with_client
 def handle(connection, address):
@@ -301,10 +335,7 @@ def handle(connection, address):
                 connected = False
                 break
             elif(cmd[0] == "UPLOAD"):
-                if(cmd[1] == "FILE"):
-                    uploadFile(connection, SERVER_FOLDER, address) 
-                elif(cmd[1] == "FOLDER"):
-                    uploadFolder(connection, SERVER_FOLDER, address)
+                upload(cmd[1],int(cmd[2]),connection,address))
             elif(cmd[0] == "download "):
                 send_file(conn)
             elif(cmd[0] =="downdload_folder ")
