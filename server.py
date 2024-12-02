@@ -346,9 +346,17 @@ def handle(connection, address):
                     uploadFile(connection, SERVER_FOLDER, address) 
                 elif(cmd[1] == "FOLDER"):
                     uploadFolder(connection, SERVER_FOLDER, address)
-            elif(cmd[0] == "DOWNLOAD"):
-                #send_file(...)
+            elif(cmd[0] == "DOWNLOAD "):
+                filename = request.split(" ", 1)[1]
+                send_file(conn, filename,SERVER_FOLDER)
+            elif(cmd[0] =="DOWNLOAD_FOLDER")
+                send_folder(conn)
                 continue
+            else:
+                # Nếu không phải lệnh download, server sẽ trả lời lại
+                print(f"Client: {request}")
+                response = input("Server: ")  # Server trả lời client
+                conn.sendall(response.encode())
         except Exception as e:
             print(f"Error with client {address}")
             logger.info(f"Error with client {address}")
