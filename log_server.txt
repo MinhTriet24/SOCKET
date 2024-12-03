@@ -1,10 +1,33 @@
-2024-11-30 18:11:42,469 - Create server successfully
-2024-11-30 18:11:42,470 - Ready to connect
-2024-11-30 18:12:01,409 - Create new thread for ('192.168.1.3', 52838)
-2024-11-30 18:12:01,410 - New connection: ('192.168.1.3', 52838) connected
-2024-11-30 18:12:06,644 - Receive message from ('192.168.1.3', 52838) : UPLOAD|FOLDER|192.168.1.3|50505
-2024-11-30 18:12:06,645 - Notify server ready for uploading folder from ('192.168.1.3', 52838)
-2024-11-30 18:12:06,655 - Created folder test successfully for ('192.168.1.3', 52838).
-2024-11-30 18:12:06,666 - Error with client ('192.168.1.3', 52838)
-2024-11-30 18:12:06,666 - Client ('192.168.1.3', 52838) disconnected.
-2024-11-30 18:12:06,666 - Remove ('192.168.1.3', 52838)
+2024-12-03 09:36:58,343 - Create server successfully
+2024-12-03 09:36:58,344 - Ready to connect
+2024-12-03 09:37:25,622 - Create new thread for ('172.20.10.2', 64252)
+2024-12-03 09:37:25,624 - New connection: ('172.20.10.2', 64252) connected
+2024-12-03 09:37:29,213 - Create new thread for ('172.20.10.2', 64255)
+2024-12-03 09:37:29,214 - New connection: ('172.20.10.2', 64255) connected
+2024-12-03 09:37:37,436 - Receive message from ('172.20.10.2', 64252) : UPLOAD|FILE|21|172.20.10.2|50505
+2024-12-03 09:37:37,447 - Receive file demo.txt (21 from ('172.20.10.2', 64252))
+2024-12-03 09:37:51,303 - Receive message from ('172.20.10.2', 64255) : download_file|demo.txt
+2024-12-03 09:37:51,304 - Received request from client: ('172.20.10.2', 64255) and responded
+2024-12-03 09:37:51,304 - Sent respond: Found file from ('172.20.10.2', 64255)
+2024-12-03 09:37:51,305 - Received ACK from ('172.20.10.2', 64255)
+2024-12-03 09:37:51,320 - Sent file 'demo.txt' succesfully for ('172.20.10.2', 64255) 
+2024-12-03 09:38:12,965 - Receive message from ('172.20.10.2', 64255) : UPLOAD|FOLDER|0|172.20.10.2|50505
+2024-12-03 09:38:12,966 - Received folder 'test' from ('172.20.10.2', 64255)
+2024-12-03 09:38:12,966 - Created folder test successfully for ('172.20.10.2', 64255).
+2024-12-03 09:38:12,977 - Receive file anh.png (288904 from ('172.20.10.2', 64255))
+2024-12-03 09:38:13,017 - Receive file Eh.txt (4 from ('172.20.10.2', 64255))
+2024-12-03 09:38:13,039 - Receive file vanban.txt (5 from ('172.20.10.2', 64255))
+2024-12-03 09:38:13,055 - Saved folder test successfully from ('172.20.10.2', 64255)
+2024-12-03 09:38:13,055 - Notify server ready for uploading folder from ('172.20.10.2', 64255)
+2024-12-03 09:38:24,624 - Receive message from ('172.20.10.2', 64252) : download_folder|test
+2024-12-03 09:38:24,626 - Received folder 'test successfully from ('172.20.10.2', 64252)
+2024-12-03 09:38:24,661 - ZIP folder successfully for ('172.20.10.2', 64252)
+2024-12-03 09:38:24,661 - Found folder from ('172.20.10.2', 64252)
+2024-12-03 09:38:24,694 - Sent folder 'test' successfully
+2024-12-03 09:38:24,695 - Removed file ZIP folder from ('172.20.10.2', 64252)
+2024-12-03 09:38:29,144 - Receive message from ('172.20.10.2', 64255) : QUIT|172.20.10.2|50505
+2024-12-03 09:38:29,146 - Client ('172.20.10.2', 64255) disconnected.
+2024-12-03 09:38:29,146 - Remove ('172.20.10.2', 64255)
+2024-12-03 09:38:32,866 - Receive message from ('172.20.10.2', 64252) : QUIT|172.20.10.2|50505
+2024-12-03 09:38:32,868 - Client ('172.20.10.2', 64252) disconnected.
+2024-12-03 09:38:32,868 - Remove ('172.20.10.2', 64252)

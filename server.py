@@ -1,3 +1,4 @@
+import shutil
 import socket
 import threading
 import logging
@@ -30,52 +31,6 @@ logger.info("Create server successfully")
 clients = {}
 
 #Tuan
-def send_file(conn):
-    """
-    Gửi file từ server tới client theo từng chunk mà không cần lưu các chunk tạm thời.
-    """
-    try:
-        # Nhận yêu cầu từ client
-        file_name = conn.recv(1024).decode().strip()
-        conn.sendall("OK".encode())
-
-        # Lấy đường dẫn file
-        file_path = os.path.join(SERVER_FOLDER, file_name)
-        if not os.path.exists(file_path):
-            conn.sendall("NOT FOUND".encode())
-            raise FileNotFoundError(f"File {file_name} không tồn tại.")
-        else:
-            conn.sendall("FOUND".encode())
-        # Lấy kích thước file
-        file_size = os.path.getsize(file_path)
-        conn.sendall(f"{file_size}".encode())  # Gửi kích thước file
-        ack = conn.recv(10).decode().strip()  # Nhận ACK từ client
-        if ack != "OK":
-            raise Exception("Client không xác nhận kích thước file.")
-
-        # Gửi dữ liệu file theo từng chunk
-        with open(file_path, "rb") as file:
-            bytes_sent = 0
-            while bytes_sent < file_size:
-                chunk_data = file.read(CHUNK_SIZE)
-                conn.sendall(chunk_data)
-                bytes_sent += len(chunk_data)
-
-                # Hiển thị tiến độ gửi
-                progress = (bytes_sent / file_size) * 100
-                print(f"Đã gửi: {progress:.2f}%")
-
-        # Nhận xác nhận từ client sau khi gửi xong
-        ack = conn.recv(10).decode().strip()
-        if ack != "OK":
-            raise Exception("Client không xác nhận nhận đủ file.")
-        else:
-            print(f"File {file_name} đã được gửi thành công.")
-    except Exception as e:
-        conn.sendall(b"NOT OK")
-        print(f"Lỗi khi gửi file {file_name}: {e}")
-
-
 def get_unique_name(name, parent_folder_path, is_folder=False):
     """
     Đảm bảo tên file hoặc thư mục là duy nhất trong thư mục cha bằng cách thêm số vào cuối nếu cần.
@@ -112,7 +67,6 @@ def get_unique_name(name, parent_folder_path, is_folder=False):
     
     return unique_name
 
-
 def zip_folder(folder_path, zip_name):
     """
     Nén folder thành file zip.
@@ -124,7 +78,58 @@ def zip_folder(folder_path, zip_name):
                 zipf.write(file_path, os.path.relpath(file_path, folder_path))
     return os.path.getsize(zip_name)  # Trả về kích thước file zip
 
-def send_folder(server_socket):
+def send_file(conn, address):
+    """
+    Gửi file từ server tới client theo từng chunk mà không cần lưu các chunk tạm thời.
+    """
+    try:
+        # Nhận yêu cầu từ client
+        file_name = conn.recv(1024).decode().strip()
+        conn.sendall("OK".encode())
+        logger.info(f"Received request from client: {address} and responded")
+
+        # Lấy đường dẫn file
+        file_path = os.path.join(SERVER_FOLDER, file_name)
+        if not os.path.exists(file_path):
+            conn.sendall("NOT FOUND".encode())
+            logger.info(f"Sent respond: Didn't find file from {address}")
+            raise FileNotFoundError(f"File {file_name} doesn't exist.")
+        else:
+            conn.sendall("FOUND".encode())
+            logger.info(f"Sent respond: Found file from {address}")
+        # Lấy kích thước file
+        file_size = os.path.getsize(file_path)
+        conn.sendall(f"{file_size}".encode())  # Gửi kích thước file
+        ack = conn.recv(10).decode().strip()  # Nhận ACK từ client
+        logger.info(f"Received ACK from {address}")
+        if ack != "OK":
+            raise Exception("Client didn't consider size of file.")
+
+        # Gửi dữ liệu file theo từng chunk
+        with open(file_path, "rb") as file:
+            bytes_sent = 0
+            while bytes_sent < file_size:
+                chunk_data = file.read(CHUNK_SIZE)
+                conn.sendall(chunk_data)
+                bytes_sent += len(chunk_data)
+
+                # Hiển thị tiến độ gửi
+                progress = (bytes_sent / file_size) * 100
+                print(f"Sent: {progress:.2f}%")
+
+        # Nhận xác nhận từ client sau khi gửi xong
+        ack = conn.recv(10).decode().strip()
+        if ack != "OK":
+            logger.info(f"Failed sent file '{file_name} for {address} ")
+            raise Exception("Client didn't consider enoough size of file.")
+        else:
+            print(f"Sent file '{file_name}' succesfully ")
+            logger.info(f"Sent file '{file_name}' succesfully for {address} ")
+    except Exception as e:
+        conn.sendall(b"NOT OK")
+        print(f"Eror {file_name}: {e}")
+
+def send_folder(server_socket, address):
     """
     Xử lý yêu cầu từ client và gửi folder dưới dạng file ZIP trực tiếp, không sử dụng đa luồng.
     """
@@ -132,6 +137,7 @@ def send_folder(server_socket):
         # Nhận tên folder từ client
         folder_name = server_socket.recv(1024).decode().strip()
         folder_path = os.path.join(SERVER_FOLDER, folder_name)
+        logger.info(f"Received folder '{folder_name} successfully from {address}")
 
         if os.path.exists(folder_path) and os.path.isdir(folder_path):
             # Nén folder thành file zip
@@ -139,18 +145,21 @@ def send_folder(server_socket):
             zip_path = os.path.join(SERVER_FOLDER, zip_name)
             zip_name = get_unique_name(zip_name, SERVER_FOLDER, is_folder=False)
             zip_size = zip_folder(folder_path, zip_path)
+            logger.info(f"ZIP folder successfully for {address}")
 
             # Gửi thông báo rằng folder tồn tại
             server_socket.send(b"FOUND")
+            logger.info(f"Found folder from {address}")
             ack = server_socket.recv(1024).decode().strip()
             if ack != "OK":
-                raise Exception("Client không xác nhận tồn tại của file ZIP.")
+                logger.info(f"Didn't find folder from {address}")
+                raise Exception("Client didn't consider ZIP file was existed.")
 
             # Gửi kích thước file ZIP
             server_socket.send(str(zip_size).encode())
             ack = server_socket.recv(1024).decode().strip()
             if ack != "OK":
-                raise Exception("Client không xác nhận kích thước file ZIP.")
+                raise Exception("Client didn't consider size of file.")
 
             # Gửi dữ liệu file ZIP trực tiếp
             with open(zip_path, "rb") as zip_file:
@@ -162,23 +171,27 @@ def send_folder(server_socket):
 
                     # Hiển thị tiến độ gửi
                     progress = (bytes_sent / zip_size) * 100
-                    print(f"Đã gửi: {progress:.2f}%")
+                    print(f"Sent: {progress:.2f}%")
 
             # Nhận xác nhận từ client sau khi gửi xong
             ack = server_socket.recv(1024).decode().strip()
             if ack != "OK":
-                raise Exception("Client không xác nhận nhận đủ file ZIP.")
+                raise Exception("Client didn't consider to receive enough ZIP file.")
             else:
-                print(f"Folder '{folder_name}' đã được gửi thành công dưới dạng ZIP.")
+                print(f"Sent folder '{folder_name}' successfully")
+                logger.info(f"Sent folder '{folder_name}' successfully")
+
 
             # Xóa file ZIP sau khi gửi
             if os.path.exists(zip_path):
                 os.remove(zip_path)
+                logger.info(f"Removed file ZIP folder from {address}")
         else:
             # Thông báo rằng folder không tồn tại
             server_socket.send(b"NOT FOUND")
+            logger.info(f"Didn't find file ZIP folder from {address}")
     except Exception as e:
-        print(f"Lỗi khi xử lý yêu cầu gửi folder: {e}")
+        print(f"Eror: {e}")
 
 #Triet
 def free_bytes():
@@ -220,30 +233,31 @@ def uploadFile(conn, folder_path, address):
                     break 
         
         if success: #trường hợp đã gửi file thành công
-            print(f"[SERVER] Upload file {file_name} successfully.")
+            print(f"Upload file {file_name} successfully to {address}")
             conn.send(f"Uploaded successfull file {file_name}.".encode(FORMAT))
 
         elif bytes_recv != file_size: #trường hợp up file không hoàn chỉnh do mất gói hay mất kết nối 
-            logger.error(f"File {file_path} incomplete: expected {file_size}, received {bytes_recv}")
+            logger.info(f"File {file_path} incomplete: expected {file_size}, received {bytes_recv}")
             conn.send(f"[SERVER]: File transfer incomplete.".encode(FORMAT))
             os.remove(file_path)  # Xóa file không hoàn chỉnh
             return
 
     #trường hợp lỗi khi mở file để ghi
     except OSError as e:
-        logger.error(f"Error writing to file {file_path}: {e}")
+        logger.info(f"Error writing to file {file_path} from {address}")
         conn.send(f"[SERVER]: Error writing to file.".encode(FORMAT))
         return  
     except Exception as e:
         # Xử lý các lỗi không mong muốn khác
-        logger.error(f"Unexpected error during file upload: {e}")
+        logger.info(f"Unexpected error during file upload from {address}")
         conn.send(f"[SERVER]: Unexpected error during file upload.".encode(FORMAT))
         return
     
 def uploadFolder(conn, pre_folder_path, address):
     #nhận tên folder từ máy client
     folder_name = conn.recv(SIZE).decode(FORMAT)
-    print(folder_name)
+    print(f"Received folder '{folder_name}' from {address}")
+    logger.info(f"Received folder '{folder_name}' from {address}")
     folder_name = os.path.basename(folder_name) #tên của folder
 
     folder_path = os.path.join(pre_folder_path, folder_name)
@@ -287,12 +301,12 @@ def uploadFolder(conn, pre_folder_path, address):
         
         #trường hợp client bị lỗi trong quá trình gửi
         except OSError as e:
-           print(f"{msg}")
+           print(f"Received '{msg}' from {address}")
            return
         except ValueError as e:
-            print(f"Error: {e}")
+            print(f"Error: {e} from {address}")
         except Exception as e:
-           print(f"Exception caught: {e}")
+           print(f"Exception caught: {e} from {address}")
            return
 
 def upload(type, size, connection, address):
@@ -335,17 +349,11 @@ def handle(connection, address):
                 connected = False
                 break
             elif(cmd[0] == "UPLOAD"):
-                upload(cmd[1],int(cmd[2]),connection,address))
-            elif(cmd[0] == "download "):
-                send_file(conn)
-            elif(cmd[0] =="downdload_folder ")
-                send_folder(conn)
-                continue
-            else:
-                # Nếu không phải lệnh download, server sẽ trả lời lại
-                print(f"Client: {request}")
-                response = input("Server: ")  # Server trả lời client
-                conn.sendall(response.encode())
+                upload(cmd[1],int(cmd[2]),connection,address)
+            elif(cmd[0] == "download_file"):
+                send_file(connection, address)
+            elif(cmd[0] =="download_folder"):
+                send_folder(connection, address)
         except Exception as e:
             print(f"Error with client {address}")
             logger.info(f"Error with client {address}")
@@ -360,7 +368,6 @@ def handle(connection, address):
         logger.info(f"Remove {address}")
     connection.close()
 
-# 
 def main():
     server.listen()
     print(f"Server is listening on {SERVER}")
@@ -374,5 +381,5 @@ def main():
         print(f"Active connections: {len(clients) + 1}")
         print("\n")
 
-
 main()
+#10.0.240.114

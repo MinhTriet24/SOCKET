@@ -2,7 +2,6 @@ import socket
 import os
 import random
 import time
-import pandas as pd
 from tkinter import *
 from tkinter import filedialog, simpledialog, ttk
 import zipfile
@@ -65,7 +64,7 @@ def download_file(client_socket, file_name):
     try:
         # Gửi yêu cầu file đến server
         client_socket.sendall(file_name.encode())
-        print(f"Yêu cầu tải file: {file_name}")
+        print(f"Request to download file: '{file_name}' from server")
 
         ack = client_socket.recv(1024).decode().strip()
         if ack != "OK":
@@ -74,13 +73,13 @@ def download_file(client_socket, file_name):
         # Nhận phản hồi từ server
         response = client_socket.recv(1024).decode()
         if response == "NOT FOUND":
-            print(f"File '{file_name}' không tồn tại trên server.")
+            print(f"File '{file_name}' doesn't exist ")
             return
 
         # Nhận kích thước file
         file_size = int(client_socket.recv(1024).decode())
         client_socket.send(b"OK")
-        print(f"Đang tải file '{file_name}' kích thước {file_size} bytes...")
+        print(f"Downloading '{file_name}' size {file_size} bytes...")
 
         # Tạo thư mục tải xuống nếu chưa tồn tại
         os.makedirs(CLIENT_FOLDER, exist_ok=True)
@@ -96,15 +95,15 @@ def download_file(client_socket, file_name):
 
                 # Hiển thị tiến độ tải
                 progress = (bytes_received / file_size) * 100
-                print(f"Đã tải: {progress:.2f}%")
+                print(f"Downloaded: {progress:.2f}%")
 
         # Gửi xác nhận đã nhận xong file
         client_socket.sendall(b"OK")
         finish_time = datetime.now().strftime("%H:%M:%S %d-%m-%Y")
-        print(f"File '{file_name}' đã được tải thành công vào '{file_path}'.")
-        print(f"Tổng cộng: {bytes_received} bytes lúc {finish_time}.")
+        print(f"Downloaded '{file_name}' successfully and saved to '{file_path}'.")
+        print(f"Sum size {bytes_received} bytes at {finish_time}.")
     except Exception as e:
-        print(f"Lỗi khi tải file: {e}")
+        print(f"Eror when downloading: {e}")
 
 
 def download_folder(client_socket, folder_name):
@@ -114,19 +113,19 @@ def download_folder(client_socket, folder_name):
     try:
         # Gửi yêu cầu folder đến server
         client_socket.sendall(folder_name.encode())
-        print(f"Yêu cầu tải folder: {folder_name}")
+        print(f"Request downloading folder: {folder_name}")
 
         # Nhận phản hồi từ server
         response = client_socket.recv(1024).decode()
         if response == "NOT FOUND":
-            print(f"Folder '{folder_name}' không tồn tại trên server.")
+            print(f"Folder '{folder_name}' doesn't exist on server.")
             return
 
         # Nhận kích thước file ZIP
         client_socket.send(b"OK")
         zip_size = int(client_socket.recv(1024).decode())
         client_socket.send(b"OK")
-        print(f"Đang tải folder '{folder_name}' dưới dạng file ZIP kích thước {zip_size} bytes...")
+        print(f"Downloading folder '{folder_name}' dưới dạng file ZIP size {zip_size} bytes...")
 
         # Tạo thư mục tải xuống nếu chưa tồn tại
         os.makedirs(CLIENT_FOLDER, exist_ok=True)
@@ -146,7 +145,7 @@ def download_folder(client_socket, folder_name):
 
         # Gửi xác nhận đã nhận xong file ZIP
         client_socket.sendall(b"OK")
-        print(f"File ZIP của folder '{folder_name}' đã được tải thành công vào '{zip_path}'.")
+        print(f"Downloaded file ZIP folder '{folder_name}' successfully at '{zip_path}'.")
 
         # Giải nén file ZIP
         extract_folder_name = get_unique_name(folder_name, CLIENT_FOLDER, is_folder=True)
@@ -159,10 +158,10 @@ def download_folder(client_socket, folder_name):
         # Xóa file ZIP sau khi giải nén
         os.remove(zip_path)
         finish_time = datetime.now().strftime("%H:%M:%S %d-%m-%Y")
-        print(f"Folder '{folder_name}' đã được tải và giải nén vào '{extract_folder_path}'.")
-        print(f"Tổng cộng: {zip_size} bytes lúc {finish_time}.")
+        print(f"Folder '{folder_name}' was downloaded and compressed to '{extract_folder_path}'.")
+        print(f"Sum size {zip_size} bytes at {finish_time}.")
     except Exception as e:
-        print(f"Lỗi khi tải folder: {e}")
+        print(f"Eror: {e}")
             
 #Triet
 def uploadFile(file_name, conn):
@@ -302,33 +301,41 @@ def handle():
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect(ADDR) 
     try:
-            while True:
-                #Format upload messsage: request (upload) + filename/foldername or quit. Server doesn't respond for another message
-                    #Format download message: request (download/ download_folder) + filename/foldername or quit
-                    request = input("Input message: ").strip()
-                    if (request == "quit"):
-                        msg = f"QUIT|{SERVER}|{PORT}"
-                        client.send(msg.encode(FORMAT))
-                        client.close()
-                        print("Connection closed.")
-                        break
-                    #if request is upload or download file
-                    cmd = request.split(" ")
-                    if(cmd[0].lower() == "upload"):
-                        upload(cmd[1],client)
-                    elif(cmd[0] == "download "):   #có dấu space
-                        #Request to download file
-                        filename = command.split(" ", 1)[1]
-                        download_file(client_socket, filename)
-                    #Not yet
-                    elif(cmd[0] == "download_folder "):
-                        folder_name = command.split(" ", 1)[1]
-                        download_folder(client_socket, folder_name)
-                    else:
-                        # Nhận phản hồi từ server
-                        response = client_socket.recv(1024).decode()
-                        print(f"Server: {response}")
-        except Exception as e:
-                print(f"Lỗi khi giao tiếp với server: {e}")
+        while True:
+            #Format upload messsage: request (upload) + filename/foldername or quit. Server doesn't respond for another message
+            #Format download message: request (download/ download_folder) + filename/foldername or quit
+            request = input("Input message: ").strip()
+            if (request == "quit"):
+                msg = f"QUIT|{SERVER}|{PORT}"
+                client.send(msg.encode(FORMAT))
+                client.close()
+                print("Connection closed.")
+                break
+            #if request is upload or download file
+            cmd = request.split(" ")
+            if(cmd[0].lower() == "upload"):
+                upload(cmd[1],client)
+                continue
+            elif(cmd[0] == "download_file"):   #có dấu space
+                #Request to download file
+                #filename = cmd.split(" ", 1)[1]
+                msg=f"download_file|{cmd[1]}"
+                client.sendall(msg.encode())
+                download_file(client, cmd[1])
+                continue
+            #Not yet
+            elif(cmd[0] == "download_folder"):
+                #folder_name = cmd.split(" ", 1)[1]
+                msg=f"download_folder|{cmd[1]}"
+                client.sendall(msg.encode())
+                download_folder(client, cmd[1])
+                continue
+            else:
+                # Nhận phản hồi từ server
+                response = client.recv(1024).decode()
+                print(f"Server: {response}")
+                continue
+    except Exception as e:
+        print(f"Eror: {e}")
         
 handle()
